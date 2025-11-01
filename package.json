@@ -1,0 +1,23 @@
+{
+  "name": "llm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrealins/med-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/andrealins/med-agent/issues"
+  },
+  "homepage": "https://github.com/andrealins/med-agent#readme",
+  "dependencies": {
+    "localtunnel": "^2.0.2"
+  }
+}
