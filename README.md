@@ -8,7 +8,7 @@ Este projeto utiliza LLM Multimodal para analisar imagens médicas e retornar in
 
 ## Tecnologias
 - Python
-- Gradio (Interface Web)
+- Streamlit (Interface Web)
 - Google Generative AI (modelo)
 - Pillow (manipulação de imagens)
 
@@ -17,4 +17,4 @@ Este projeto utiliza LLM Multimodal para analisar imagens médicas e retornar in
 ## Como executar localmente
 ```bash
 pip install -r requirements.txt
-python app.py
+streamlit run main.py
