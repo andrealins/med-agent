@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from agno.agent import Agent
 from agno.tools.tavily import TavilyTools
-from agno.models.google import Gemini
+from agno.models.groq import Groq
 from agno.media import Image as AgnoImage
 from PIL import Image as PILImage
 from textwrap import dedent
@@ -43,8 +43,8 @@ O agente de IA analisará e trará insights, achados e hipóteses diagnósticas.
 # Menu dos modelos de LLM
 st.sidebar.header("⚙️ Configurações")
 id_model = st.sidebar.selectbox(
-    "Modelo Gemini:",
-    ("gemini-2.0-flash", "gemini-2.5-flash-preview-05-20"),
+    "Modelo (Groq):",
+    ("qwen/qwen3.8-27b", "qwen/qwen3.6-27b"),
 )
 
 #Pré-processamento da imagem
@@ -96,7 +96,8 @@ Analise a imagem médica e organize a resposta em português com as seguintes se
 med_agent = Agent(
     name="Medical Image Agent",
     role="Especialista em imagens médicas",
-    model=Gemini(id=id_model),
+    # plano free do Groq: limite de 1000 tokens de saída por minuto
+    model=Groq(id=id_model, max_tokens=900, request_params={"reasoning_effort": "none"}),
     markdown=True
 )
 
@@ -115,7 +116,7 @@ research_agent = Agent(
         Você é um pesquisador médico responsável por buscar informações complementares sobre os achados identificados.
         Forneça literatura recente e fontes confiáveis.
     """),
-    model=Gemini(id=id_model),
+    model=Groq(id="openai/gpt-oss-120b", max_tokens=900),  # outro modelo = outra cota
     tools=[TavilyTools(api_key=tavily_api)],
 )
 
