@@ -6,6 +6,7 @@
 # pip install tavily-python -q
 # pip install -q streamlit python-dotenv
 # npm install -q localtunnel
+# pip install groq
 
 import os
 from dotenv import load_dotenv
@@ -27,6 +28,11 @@ load_dotenv()
 gemini_api = os.getenv("GEMINI_API_KEY")
 tavily_api = os.getenv("TAVILY_API_KEY")
 
+# Chamando o Groq
+
+id_model = st.sidebar.selectbox("Modelo:", ("meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"))
+model=Groq(id=id_model)             # no med_agent e no research_agent
+
 
 # Configurando o Streamlit
 st.set_page_config(page_title="Med Agent", layout="centered", page_icon="🩻")
@@ -43,8 +49,8 @@ O agente de IA analisará e trará insights, achados e hipóteses diagnósticas.
 # Menu dos modelos de LLM
 st.sidebar.header("⚙️ Configurações")
 id_model = st.sidebar.selectbox(
-    "Modelo (Groq):",
-    ("qwen/qwen3.8-27b", "qwen/qwen3.6-27b"),
+    "Modelo Gemini:",
+    ("gemini-2.5-flash", "gemini-2.5-pro"),
 )
 
 #Pré-processamento da imagem
@@ -96,8 +102,7 @@ Analise a imagem médica e organize a resposta em português com as seguintes se
 med_agent = Agent(
     name="Medical Image Agent",
     role="Especialista em imagens médicas",
-    # plano free do Groq: limite de 1000 tokens de saída por minuto
-    model=Groq(id=id_model, max_tokens=900, request_params={"reasoning_effort": "none"}),
+    model=Gemini(id=id_model),
     markdown=True
 )
 
@@ -116,7 +121,7 @@ research_agent = Agent(
         Você é um pesquisador médico responsável por buscar informações complementares sobre os achados identificados.
         Forneça literatura recente e fontes confiáveis.
     """),
-    model=Groq(id="openai/gpt-oss-120b", max_tokens=900),  # outro modelo = outra cota
+    model=Gemini(id=id_model),
     tools=[TavilyTools(api_key=tavily_api)],
 )
 
