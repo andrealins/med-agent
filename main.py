@@ -1,85 +1,55 @@
-##Instalando as bibliotecas 
-# pip install jupyterlab
-# pip install pillow
-# pip install -q agno
-# pip install google-genai
-# pip install tavily-python -q
-# pip install -q streamlit python-dotenv
-# npm install -q localtunnel
-# pip install groq
-
+import io
 import os
-from dotenv import load_dotenv
-from pathlib import Path
-from agno.agent import Agent
-from agno.tools.tavily import TavilyTools
-from agno.models.groq import Groq
-from agno.media import Image as AgnoImage
-from PIL import Image as PILImage
 from textwrap import dedent
+
 import streamlit as st
+from dotenv import load_dotenv
+from PIL import Image as PILImage
 
-##Inserindo as chaves
-
-# 1. Definindo o caminho base para o arquivo
-dotenv_path = Path('.') / '.env'
+from agno.agent import Agent
+from agno.media import Image as AgnoImage
+from agno.models.anthropic import Claude
+from agno.models.google import Gemini
+from agno.models.openai import OpenAIChat
+from agno.tools.tavily import TavilyTools
 
 load_dotenv()
-gemini_api = os.getenv("GEMINI_API_KEY")
-tavily_api = os.getenv("TAVILY_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
-# Chamando o Groq
+# ---------------------------------------------------------------------------
+# Provedores de IA disponíveis
+# Para incluir um modelo novo, basta acrescentar o id na lista "modelos".
+# ---------------------------------------------------------------------------
+PROVEDORES = {
+    "Claude (Anthropic)": {
+        "classe": Claude,
+        "modelos": ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"],
+        "onde_obter": "https://console.anthropic.com/settings/keys",
+    },
+    "Gemini (Google)": {
+        "classe": Gemini,
+        "modelos": ["gemini-2.5-flash", "gemini-2.5-pro"],
+        "onde_obter": "https://aistudio.google.com/apikey",
+    },
+    "OpenAI (ChatGPT)": {
+        "classe": OpenAIChat,
+        "modelos": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o"],
+        "onde_obter": "https://platform.openai.com/api-keys",
+    },
+}
 
-id_model = st.sidebar.selectbox("Modelo:", ("meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"))
-model=Groq(id=id_model)             # no med_agent e no research_agent
+# Etapas do pipeline, na ordem, com o percentual da barra ao iniciar cada uma
+ETAPAS = [
+    ("preparo", "🖼️ Redimensionando a imagem", 10),
+    ("analise", "🩻 Med está analisando a imagem", 25),
+    ("busca", "📚 Rio está buscando evidências científicas", 60),
+    ("formato", "📝 Formatando o resultado", 90),
+]
 
-
-# Configurando o Streamlit
-st.set_page_config(page_title="Med Agent", layout="centered", page_icon="🩻")
-
-st.title("🩺 Análise de Imagens Médicas.")
-st.markdown("""
-O Med é um especialista em diagnóstico por imagem e trabalha com o Rio, que é pesquisador médico!
-Carregue uma **imagem médica** (Fotografia, raio-X, ressonância, tomografia, ultrassom, etc.).
-O agente de IA analisará e trará insights, achados e hipóteses diagnósticas.
-
-⚠️ **Atenção:** Esta ferramenta é apenas para fins educacionais e não substitui avaliação médica profissional.
-""")
-
-# Menu dos modelos de LLM
-st.sidebar.header("⚙️ Configurações")
-id_model = st.sidebar.selectbox(
-    "Modelo Gemini:",
-    ("gemini-2.5-flash", "gemini-2.5-pro"),
-)
-
-#Pré-processamento da imagem
-
-def preprocess_img(img_path):
-    image = PILImage.open(img_path)
-    width, height = image.size
-    aspect_ratio = width / height
-    new_width = 600
-    new_height = int(new_width / aspect_ratio)
-    resized = image.resize((new_width, new_height))
-    temp_path = "temp_img.png"
-    resized.save(temp_path)
-    return temp_path, resized
-
-# Formatando a resposta
-def format_res(res, return_thinking=False):
-    res = res.strip()
-    if return_thinking:
-        res = res.replace("<think>", "[pensando...] ")
-        res = res.replace("</think>", "\n---\n")
-    else:
-        if "</think>" in res:
-            res = res.split("</think>")[-1].strip()
-    res = res.replace("```","")
-    return res
-
-# Prompts e agentes
-prompt_analysis = """
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+PROMPT_ANALISE = """
 Você é um especialista em diagnóstico por imagem.
 Analise a imagem médica e organize a resposta em português com as seguintes seções:
 
@@ -95,68 +65,157 @@ Analise a imagem médica e organize a resposta em português com as seguintes se
 - Forneça diagnóstico principal com nível de confiança (alto, moderado, baixo).
 - Liste diagnósticos diferenciais e justificativas visuais.
 
-### 4. Explicação em linguagem leiga
-- Traduza os achados em linguagem simples para o paciente.
+### 4. Resumo em linguagem simples
+- Resuma os achados em linguagem simples, para o profissional usar ao explicar o exame ao paciente.
 """
 
-med_agent = Agent(
-    name="Medical Image Agent",
-    role="Especialista em imagens médicas",
-    model=Gemini(id=id_model),
-    markdown=True
-)
-
-prompt_search_template = """Com base na seguinte análise de imagem médica, realize uma pesquisa complementar.
- - Utilize Tavily ou PubMed para encontrar artigos e protocolos atuais.
+PROMPT_BUSCA = """Com base na seguinte análise de imagem médica, realize uma pesquisa complementar.
+ - Utilize a busca do Tavily para encontrar artigos e protocolos atuais (de preferência PubMed e diretrizes oficiais).
  - Forneça 2 a 3 links ou referências confiáveis.
  - Organize a resposta em markdown.
 
 Resultado da análise médica: "{}"
 """
 
-research_agent = Agent(
-    name="Researcher Agent",
-    role="Pesquisador médico",
-    instructions=dedent("""
-        Você é um pesquisador médico responsável por buscar informações complementares sobre os achados identificados.
-        Forneça literatura recente e fontes confiáveis.
-    """),
-    model=Gemini(id=id_model),
-    tools=[TavilyTools(api_key=tavily_api)],
-)
+INSTRUCOES_PESQUISADOR = dedent("""
+    Você é um pesquisador médico responsável por buscar informações complementares sobre os achados identificados.
+    Forneça literatura recente e fontes confiáveis.
+""")
 
-# Função principal da pipeline
-def process_img_pipeline(agno_img):
-    res = med_agent.run(prompt_analysis, images=[agno_img])
-    analysis = res.content
 
-    prompt_search = prompt_search_template.format(analysis)
-    res_search = research_agent.run(prompt_search)
+# ---------------------------------------------------------------------------
+# Funções do pipeline
+# ---------------------------------------------------------------------------
+def preprocess_img(arquivo, largura=600):
+    """Redimensiona a imagem em memória (sem gravar arquivo temporário)."""
+    imagem = PILImage.open(arquivo).convert("RGB")
+    proporcao = imagem.height / imagem.width
+    redimensionada = imagem.resize((largura, int(largura * proporcao)))
+    buffer = io.BytesIO()
+    redimensionada.save(buffer, format="PNG")
+    return AgnoImage(content=buffer.getvalue(), format="png")
 
-    result = f"### 🩻 Resultado da Análise da Imagem\n{format_res(analysis)}\n\n"
-    result += "---\n\n"
-    result += f"### 📚 Pesquisa Complementar\n{format_res(res_search.content)}"
 
-    return result
+def format_res(res):
+    """Remove marcações extras que alguns modelos devolvem."""
+    res = (res or "").strip()
+    if "</think>" in res:
+        res = res.split("</think>")[-1].strip()
+    return res.replace("```", "")
 
-# Enviando imagem
-uploaded_img = st.file_uploader("Envie uma imagem médica (JPG, PNG)", type=["jpg", "jpeg", "png"])
 
-if uploaded_img is not None:
-    st.image(uploaded_img, caption="Imagem enviada", use_container_width=True)
+def criar_agentes(provedor, modelo, api_key):
+    """Cria os dois agentes com o modelo e a chave escolhidos pelo usuário."""
+    classe = PROVEDORES[provedor]["classe"]
+    med = Agent(
+        name="Med",
+        role="Especialista em imagens médicas",
+        model=classe(id=modelo, api_key=api_key),
+        markdown=True,
+    )
+    rio = Agent(
+        name="Rio",
+        role="Pesquisador médico",
+        instructions=INSTRUCOES_PESQUISADOR,
+        model=classe(id=modelo, api_key=api_key),
+        tools=[TavilyTools(api_key=TAVILY_API_KEY)],
+        markdown=True,
+    )
+    return med, rio
 
-    if st.button("🔍 Analisar imagem"):
-        with st.spinner("Analisando imagem..."):
-            img_path = f"temp_{uploaded_img.name}"
-            with open(img_path, "wb") as f:
-                f.write(uploaded_img.getbuffer())
 
-            temp_path, _ = preprocess_img(img_path)
-            agno_img = AgnoImage(filepath=temp_path)
+def process_img_pipeline(arquivo, med, rio, avisar):
+    """Executa as etapas e chama avisar(etapa) no início de cada uma."""
+    avisar("preparo")
+    imagem = preprocess_img(arquivo)
 
-            result = process_img_pipeline(agno_img)
-            st.markdown(result, unsafe_allow_html=True)
+    avisar("analise")
+    analise = med.run(PROMPT_ANALISE, images=[imagem]).content
 
-            os.remove(img_path)
-else:
+    avisar("busca")
+    pesquisa = rio.run(PROMPT_BUSCA.format(analise)).content
+
+    avisar("formato")
+    resultado = f"### 🩻 Resultado da Análise da Imagem\n{format_res(analise)}\n\n---\n\n"
+    resultado += f"### 📚 Pesquisa Complementar\n{format_res(pesquisa)}"
+    return resultado
+
+
+def mensagem_de_erro(erro):
+    """Traduz os erros mais comuns das APIs para o usuário."""
+    texto = str(erro).lower()
+    if any(p in texto for p in ("401", "unauthorized", "invalid api key", "api key not valid", "authentication", "permission")):
+        return "A chave de API foi recusada. Confira se ela está correta e é do provedor escolhido."
+    if any(p in texto for p in ("404", "not found", "does not exist")):
+        return "Esse modelo não está disponível para a sua chave. Escolha outro modelo na barra lateral."
+    if any(p in texto for p in ("429", "rate limit", "quota", "credit", "billing")):
+        return "Limite de uso ou créditos esgotados nessa chave. Tente mais tarde ou use outra chave."
+    return f"Não foi possível concluir a análise: {erro}"
+
+
+# ---------------------------------------------------------------------------
+# Interface
+# ---------------------------------------------------------------------------
+st.set_page_config(page_title="Med Agent", layout="centered", page_icon="🩻")
+
+st.title("🩺 Análise de Imagens Médicas")
+st.markdown("""
+O **Med** é um especialista em diagnóstico por imagem e trabalha com o **Rio**, que é pesquisador médico.
+Carregue uma **imagem médica** (fotografia, raio-X, ressonância, tomografia, ultrassom etc.)
+e receba uma análise estruturada com referências científicas.
+
+⚠️ **Atenção:** ferramenta apenas para fins educacionais. Não substitui a avaliação de um profissional de saúde.
+""")
+
+with st.sidebar:
+    st.header("⚙️ Configurações")
+    provedor = st.selectbox("Provedor de IA", list(PROVEDORES))
+    modelo = st.selectbox("Modelo", PROVEDORES[provedor]["modelos"])
+    modelo_manual = st.text_input("Outro modelo (opcional)", placeholder="ex.: id de um modelo mais novo")
+    if modelo_manual.strip():
+        modelo = modelo_manual.strip()
+
+    api_key = st.text_input(
+        f"Sua chave de API ({provedor.split(' ')[0]})",
+        type="password",
+        key=f"chave_{provedor}",
+        help="A chave fica só nesta sessão do navegador e não é salva no servidor.",
+    )
+    st.caption(f"Não tem chave? [Crie aqui]({PROVEDORES[provedor]['onde_obter']}).")
+
+    if not TAVILY_API_KEY:
+        st.error("TAVILY_API_KEY não encontrada no .env do servidor.")
+
+arquivo = st.file_uploader("Envie uma imagem médica (JPG, PNG)", type=["jpg", "jpeg", "png"])
+
+if arquivo is None:
     st.info("⬆️ Envie uma imagem médica para começar.")
+    st.stop()
+
+st.image(arquivo, caption="Imagem enviada", use_container_width=True)
+
+pronto = bool(api_key) and bool(TAVILY_API_KEY)
+if not api_key:
+    st.warning("🔑 Informe sua chave de API na barra lateral para liberar a análise.")
+
+if st.button("🔍 Analisar imagem", disabled=not pronto, type="primary"):
+    barra = st.progress(0, text="Iniciando...")
+    status = st.status("Os agentes estão trabalhando...", expanded=True)
+    etapas = {chave: (texto, pct) for chave, texto, pct in ETAPAS}
+
+    def avisar(etapa):
+        texto, pct = etapas[etapa]
+        barra.progress(pct, text=texto)
+        status.write(texto)
+
+    try:
+        med, rio = criar_agentes(provedor, modelo, api_key)
+        resultado = process_img_pipeline(arquivo, med, rio, avisar)
+    except Exception as erro:
+        barra.empty()
+        status.update(label="A análise foi interrompida", state="error")
+        st.error(mensagem_de_erro(erro))
+    else:
+        barra.progress(100, text="✅ Concluído")
+        status.update(label="Análise concluída", state="complete", expanded=False)
+        st.markdown(resultado)

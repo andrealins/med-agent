@@ -1,0 +1,8 @@
+agno>=2.0
+anthropic
+openai
+google-genai
+tavily-python
+streamlit>=1.40
+python-dotenv
+pillow
